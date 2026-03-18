@@ -1,0 +1,69 @@
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const startBtn = document.getElementById('start-btn');
+  
+  let videoTrack = null;
+  let strobeInterval;
+
+  // 1. Request Camera Access and setup the track
+  async function setupFlashlight() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" } // Forces the rear camera
+      });
+      videoTrack = stream.getVideoTracks()[0];
+      
+      // Check if the phone actually has a flashlight
+      const capabilities = videoTrack.getCapabilities();
+      if (!capabilities.torch) {
+        alert("Your device doesn't support the web flashlight!");
+      }
+    } catch (err) {
+      console.error("Camera access denied or failed:", err);
+      alert("We need camera access to flash the lights!");
+    }
+  }
+
+  // 2. Function to turn the physical light on or off
+  async function setTorch(isOn) {
+    if (videoTrack) {
+      try {
+        await videoTrack.applyConstraints({
+          advanced: [{ torch: isOn }]
+        });
+      } catch (err) {
+        console.error("Could not toggle the torch:", err);
+      }
+    }
+  }
+
+  // 3. Start the experience when the user clicks the button
+  startBtn.addEventListener('click', async () => {
+    startBtn.style.display = 'none';
+    
+    // Prevent screen from sleeping
+    try { await navigator.wakeLock.request('screen'); } 
+    catch (err) { console.log('Wake Lock denied', err); }
+
+    // Initialize the camera
+    await setupFlashlight();
+
+    // 4. Listen for commands from your Controller
+    socket.on('light_command', async (data) => {
+      clearInterval(strobeInterval); // Stop any existing strobe
+
+      if (data.action === 'on') {
+        await setTorch(true);
+      } else if (data.action === 'off') {
+        await setTorch(false);
+      } else if (data.action === 'strobe') {
+        let isOn = false;
+        strobeInterval = setInterval(async () => {
+          isOn = !isOn;
+          await setTorch(isOn);
+        }, data.speed || 150); // Note: Hardware LEDs can't strobe as fast as screens
+      }
+    });
+  });
+</script>

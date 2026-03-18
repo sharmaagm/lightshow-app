@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Lightshow Controller</title>
+</head>
+<body>
+  <h1>Controller</h1>
+  <button onclick="sendCommand('on', 'white')">Lights On (White)</button>
+  <button onclick="sendCommand('on', 'blue')">Lights On (Blue)</button>
+  <button onclick="sendCommand('strobe', 'white', 100)">Strobe Fast</button>
+  <button onclick="sendCommand('strobe', 'red', 500)">Strobe Slow (Red)</button>
+  <button onclick="sendCommand('off')">Turn Off</button>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    function sendCommand(action, color = 'black', speed = 0) {
+      socket.emit('send_light_command', { action, color, speed });
+    }
+  </script>
+</body>
+</html>
