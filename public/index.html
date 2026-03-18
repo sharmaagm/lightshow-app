@@ -1,69 +1,100 @@
-<script src="/socket.io/socket.io.js"></script>
-<script>
-  const socket = io();
-  const startBtn = document.getElementById('start-btn');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Lightshow</title>
+  <style>
+    body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; background: black; color: white; overflow: hidden; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    #start-btn { padding: 20px 40px; font-size: 20px; background: white; color: black; border: none; border-radius: 10px; cursor: pointer; z-index: 10; font-weight: bold; }
+    #status { margin-top: 20px; text-align: center; z-index: 10; padding: 0 20px; font-size: 14px; opacity: 0.8; }
+    #screen-light { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: black; z-index: 1; transition: background 0.05s; }
+  </style>
+</head>
+<body>
+
+  <div id="screen-light"></div>
   
-  let videoTrack = null;
-  let strobeInterval;
+  <button id="start-btn">Join the Lightshow</button>
+  <div id="status">Waiting to join...</div>
 
-  // 1. Request Camera Access and setup the track
-  async function setupFlashlight() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" } // Forces the rear camera
-      });
-      videoTrack = stream.getVideoTracks()[0];
-      
-      // Check if the phone actually has a flashlight
-      const capabilities = videoTrack.getCapabilities();
-      if (!capabilities.torch) {
-        alert("Your device doesn't support the web flashlight!");
-      }
-    } catch (err) {
-      console.error("Camera access denied or failed:", err);
-      alert("We need camera access to flash the lights!");
-    }
-  }
-
-  // 2. Function to turn the physical light on or off
-  async function setTorch(isOn) {
-    if (videoTrack) {
-      try {
-        await videoTrack.applyConstraints({
-          advanced: [{ torch: isOn }]
-        });
-      } catch (err) {
-        console.error("Could not toggle the torch:", err);
-      }
-    }
-  }
-
-  // 3. Start the experience when the user clicks the button
-  startBtn.addEventListener('click', async () => {
-    startBtn.style.display = 'none';
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const startBtn = document.getElementById('start-btn');
+    const statusText = document.getElementById('status');
+    const screenLight = document.getElementById('screen-light');
     
-    // Prevent screen from sleeping
-    try { await navigator.wakeLock.request('screen'); } 
-    catch (err) { console.log('Wake Lock denied', err); }
+    let videoTrack = null;
+    let strobeInterval;
+    let hasHardwareLight = false;
 
-    // Initialize the camera
-    await setupFlashlight();
-
-    // 4. Listen for commands from your Controller
-    socket.on('light_command', async (data) => {
-      clearInterval(strobeInterval); // Stop any existing strobe
-
-      if (data.action === 'on') {
-        await setTorch(true);
-      } else if (data.action === 'off') {
-        await setTorch(false);
-      } else if (data.action === 'strobe') {
-        let isOn = false;
-        strobeInterval = setInterval(async () => {
-          isOn = !isOn;
-          await setTorch(isOn);
-        }, data.speed || 150); // Note: Hardware LEDs can't strobe as fast as screens
+    // Attempt to connect to the physical hardware
+    async function setupFlashlight() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        videoTrack = stream.getVideoTracks()[0];
+        
+        const capabilities = videoTrack.getCapabilities();
+        if (capabilities.torch) {
+          hasHardwareLight = true;
+          statusText.innerText = "Connected! Hardware Flashlight Ready.";
+        } else {
+          statusText.innerText = "Connected! (Screen-only mode, no hardware light found).";
+        }
+      } catch (err) {
+        console.error("Camera error:", err);
+        statusText.innerText = "Camera denied or unavailable. Using screen-only mode.";
       }
+    }
+
+    // Trigger both the hardware and the screen fallback
+    async function setLights(isOn, color) {
+      // 1. Try Hardware light
+      if (hasHardwareLight && videoTrack) {
+        try {
+          await videoTrack.applyConstraints({ advanced: [{ torch: isOn }] });
+        } catch (err) {
+          console.error("Torch error:", err);
+        }
+      }
+      
+      // 2. Always trigger the screen light as a visual backup
+      if (isOn) {
+        screenLight.style.background = color || 'white';
+      } else {
+        screenLight.style.background = 'black';
+      }
+    }
+
+    // Start everything when they click the button
+    startBtn.addEventListener('click', async () => {
+      startBtn.style.display = 'none';
+      statusText.innerText = "Requesting camera access...";
+      
+      try { await navigator.wakeLock.request('screen'); } 
+      catch (err) { console.log('Wake Lock denied'); }
+
+      await setupFlashlight();
+
+      // Listen to the Admin controller
+      socket.on('light_command', async (data) => {
+        clearInterval(strobeInterval);
+
+        if (data.action === 'on') {
+          await setLights(true, data.color);
+        } else if (data.action === 'off') {
+          await setLights(false, 'black');
+        } else if (data.action === 'strobe') {
+          let isOn = false;
+          strobeInterval = setInterval(async () => {
+            isOn = !isOn;
+            await setLights(isOn, data.color);
+          }, data.speed || 150);
+        }
+      });
     });
-  });
-</script>
+  </script>
+</body>
+</html>
