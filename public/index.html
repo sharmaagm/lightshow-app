@@ -32,7 +32,10 @@
     async function setupFlashlight() {
       try {
         // 1. Ask for basic permission first to unlock device labels
-        await navigator.mediaDevices.getUserMedia({ video: true });
+        const initialStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        
+        // CRITICAL FIX: Immediately turn off this initial camera so we don't lock the hardware!
+        initialStream.getTracks().forEach(track => track.stop());
 
         // 2. Get a list of EVERY media device on the phone
         const devices = await navigator.mediaDevices.enumerateDevices();
@@ -42,38 +45,45 @@
 
         // 3. Test each camera one by one
         for (let i = 0; i < videoDevices.length; i++) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: videoDevices[i].deviceId } }
-          });
-          
-          const track = stream.getVideoTracks()[0];
-          
-          // Wait a tiny fraction of a second for the hardware to wake up
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
-          const capabilities = track.getCapabilities();
+          try { // NEW: Inner try-catch so one bad lens doesn't crash the whole loop
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: videoDevices[i].deviceId } }
+            });
+            
+            const track = stream.getVideoTracks()[0];
+            
+            // Wait a tiny fraction of a second for the hardware to wake up
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            const capabilities = track.getCapabilities();
 
-          if (capabilities.torch) {
-            // We found the golden lens!
-            videoTrack = track;
-            hasHardwareLight = true;
-            statusText.innerText = "Connected! Hardware Flashlight Ready.";
-            return; // Stop searching, we are good to go!
-          } else {
-            // Not this lens, turn it off so we don't drain the battery
-            track.stop(); 
+            if (capabilities.torch) {
+              // We found the golden lens!
+              videoTrack = track;
+              hasHardwareLight = true;
+              statusText.innerText = "Connected! Hardware Flashlight Ready.";
+              return; // Stop searching!
+            } else {
+              // Not this lens, turn it off so we don't drain the battery
+              track.stop(); 
+            }
+          } catch (lensError) {
+            // If a specific strange lens (like a depth sensor) refuses to open, 
+            // just ignore the error and quietly move on to check the next lens.
+            console.log("Skipped an unreadable lens...");
           }
         }
 
-        // If the loop finishes and we didn't return, no hardware flash exists
-        statusText.innerText = "Connected! (Screen-only mode).";
+        // If the loop finishes and we didn't find a torch
+        if (!hasHardwareLight) {
+          statusText.innerText = "Connected! (Screen-only mode).";
+        }
 
       } catch (err) {
-        console.error("Camera error:", err);
+        console.error("Major camera error:", err);
         statusText.innerText = "Camera denied or unavailable. Using screen-only mode.";
       }
     }
-
     // Trigger both the hardware and the screen fallback
     async function setLights(isOn, color) {
       // 1. Try Hardware light
