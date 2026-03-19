@@ -17,7 +17,7 @@
     button:active { transform: scale(0.95); }
     
     .btn-on { background: linear-gradient(135deg, #28a745, #20c997); }
-    .btn-blue { background: linear-gradient(135deg, #007bff, #6610f2); }
+    .btn-sparkle { background: linear-gradient(135deg, #f1c40f, #e67e22); color: #000; font-size: 18px; }
     .btn-strobe { background: linear-gradient(135deg, #dc3545, #fd7e14); grid-column: span 2; font-size: 20px; }
     .btn-off { background: #333; border: 2px solid #555; grid-column: span 2; color: #aaa; }
     
@@ -37,7 +37,7 @@
     
     <div class="button-grid">
       <button class="btn-on" onclick="sendSolidColor()">Solid Custom</button>
-      <button class="btn-blue" onclick="sendCommand('on', 'blue')">Solid Blue</button>
+      <button class="btn-sparkle" onclick="sendSparkle()">✨ Sparkle</button>
       <button class="btn-strobe" onclick="sendStrobe()">Start Strobe</button>
       <button class="btn-off" onclick="sendCommand('off')">All Lights Off</button>
     </div>
@@ -48,7 +48,7 @@
     </div>
 
     <div class="slider-group">
-      <label><span>Strobe Speed</span> <span id="speed-display">150ms</span></label>
+      <label><span>Speed (Strobe/Sparkle)</span> <span id="speed-display">150ms</span></label>
       <input type="range" id="speed-slider" min="50" max="1000" step="10" value="150" oninput="updateSpeedDisplay()" onchange="updateLiveSettings()">
     </div>
     
@@ -57,47 +57,44 @@
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    let currentMode = 'off'; // Keeps track of what the lights are currently doing
+    let currentMode = 'off';
 
-    // Listen for total connected users
     socket.on('user_count', (count) => {
-      // Subtract 1 so you don't count your own admin device
       const actualUsers = Math.max(0, count - 1);
       document.getElementById('user-count').innerText = actualUsers;
     });
 
-    // Base command function
     function sendCommand(action, color = 'black', speed = 0) {
       currentMode = action;
       socket.emit('send_light_command', { action, color, speed });
     }
 
-    // Triggered by the Custom Color button
     function sendSolidColor() {
       const color = document.getElementById('color-picker').value;
       sendCommand('on', color);
     }
 
-    // Triggered by the Strobe button
     function sendStrobe() {
       const speed = document.getElementById('speed-slider').value;
       const color = document.getElementById('color-picker').value;
       sendCommand('strobe', color, speed);
     }
 
-    // Updates the text label above the slider while you drag it
+    function sendSparkle() {
+      const speed = document.getElementById('speed-slider').value;
+      const color = document.getElementById('color-picker').value;
+      sendCommand('sparkle', color, speed);
+    }
+
     function updateSpeedDisplay() {
       const speed = document.getElementById('speed-slider').value;
       document.getElementById('speed-display').innerText = speed + 'ms';
     }
 
-    // If you drag the slider OR change the color while lights are already on/strobing, update them instantly
     function updateLiveSettings() {
-      if (currentMode === 'strobe') {
-        sendStrobe();
-      } else if (currentMode === 'on') {
-        sendSolidColor();
-      }
+      if (currentMode === 'strobe') sendStrobe();
+      else if (currentMode === 'on') sendSolidColor();
+      else if (currentMode === 'sparkle') sendSparkle();
     }
   </script>
 </body>
