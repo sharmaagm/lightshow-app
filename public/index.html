@@ -114,19 +114,52 @@
       await setupFlashlight();
 
       // Listen to the Admin controller
+      let currentClientMode = 'off'; // Track local state
+
       socket.on('light_command', async (data) => {
         clearInterval(strobeInterval);
+        currentClientMode = data.action;
 
         if (data.action === 'on') {
           await setLights(true, data.color);
+        
         } else if (data.action === 'off') {
           await setLights(false, 'black');
+        
         } else if (data.action === 'strobe') {
           let isOn = false;
           strobeInterval = setInterval(async () => {
             isOn = !isOn;
             await setLights(isOn, data.color);
           }, data.speed || 150);
+        
+        } else if (data.action === 'sparkle') {
+          // THE SPARKLE MATH
+          let isOn = false;
+          
+          // 1. Pick a random delay before this specific phone starts (between 0 and 1 second)
+          const randomStartDelay = Math.random() * 1000;
+          
+          // 2. Slightly randomize the speed for this phone so they drift out of sync
+          const baseSpeed = parseInt(data.speed) || 150;
+          // Creates a random variance of +/- 50ms from your slider speed
+          const randomSpeed = baseSpeed + (Math.random() * 100) - 50; 
+
+          // Wait for the random delay, then start flashing
+          setTimeout(() => {
+            // Safety check: Did the admin hit 'Off' while we were waiting to start?
+            if (currentClientMode !== 'sparkle') return; 
+
+            strobeInterval = setInterval(async () => {
+              isOn = !isOn;
+              // Add a slight chance to skip a flash to make it look more organic
+              if (Math.random() > 0.2) { 
+                await setLights(isOn, data.color);
+              } else {
+                await setLights(false, 'black');
+              }
+            }, Math.max(80, randomSpeed)); // Hard limit of 80ms so hardware doesn't crash
+          }, randomStartDelay);
         }
       });
     });
