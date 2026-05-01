@@ -2,164 +2,176 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Lightshow</title>
+  <title>Live Lightshow</title>
   <style>
-    body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; background: black; color: white; overflow: hidden; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    #start-btn { padding: 20px 40px; font-size: 20px; background: white; color: black; border: none; border-radius: 10px; cursor: pointer; z-index: 10; font-weight: bold; }
-    #status { margin-top: 20px; text-align: center; z-index: 10; padding: 0 20px; font-size: 14px; opacity: 0.8; }
+    :root { --accent: #00ffcc; }
+    body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; background: black; color: white; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; }
+    
+    /* The main screen fallback flash layer */
     #screen-light { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: black; z-index: 1; transition: background 0.05s; }
+    
+    /* The frosted glass UI container */
+    .ui-container { z-index: 10; background: rgba(20, 20, 20, 0.7); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 40px 30px; text-align: center; width: 85%; max-width: 350px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); transition: opacity 0.4s ease; }
+    
+    .hidden { display: none !important; }
+    
+    .icon { font-size: 50px; margin-bottom: 15px; }
+    h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+    p { margin: 0 0 30px 0; font-size: 15px; color: #aaaaaa; line-height: 1.4; }
+    
+    /* The glowing join button */
+    .join-btn { background: linear-gradient(135deg, #00ffcc, #0088ff); color: black; font-size: 20px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; border: none; border-radius: 50px; padding: 20px 40px; cursor: pointer; box-shadow: 0 10px 30px rgba(0, 255, 204, 0.3); transition: transform 0.2s, box-shadow 0.2s; width: 100%; }
+    .join-btn:active { transform: scale(0.95); box-shadow: 0 5px 15px rgba(0, 255, 204, 0.2); }
+    
+    /* Simple spinning animation for the loading state */
+    .spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.1); border-radius: 50%; border-top-color: var(--accent); animation: spin 1s ease-in-out infinite; margin-bottom: 20px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .pulse { animation: pulseAnim 2s infinite; }
+    @keyframes pulseAnim { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
   </style>
 </head>
 <body>
 
   <div id="screen-light"></div>
   
-  <button id="start-btn">Join the Lightshow</button>
-  <div id="status">Waiting to join...</div>
+  <div class="ui-container" id="ui-box">
+    
+    <!-- State 1: Welcome / Join -->
+    <div id="state-join">
+      <div class="icon">✨</div>
+      <h2>Lightshow</h2>
+      <p>Get ready to light up the dance floor. Keep your browser open.</p>
+      <button class="join-btn" id="start-btn">Join Now</button>
+    </div>
+
+    <!-- State 2: Connecting (No technical text) -->
+    <div id="state-loading" class="hidden">
+      <div class="spinner"></div>
+      <h2>Connecting</h2>
+      <p>Syncing with the DJ...</p>
+    </div>
+
+    <!-- State 3: Ready! -->
+    <div id="state-ready" class="hidden">
+      <div class="icon pulse">✅</div>
+      <h2>You're Synced!</h2>
+      <p>Hold your phone up and wait for the lights to drop. Do not lock your screen.</p>
+    </div>
+
+  </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    const startBtn = document.getElementById('start-btn');
-    const statusText = document.getElementById('status');
+    
+    // UI Elements
+    const uiBox = document.getElementById('ui-box');
+    const stateJoin = document.getElementById('state-join');
+    const stateLoading = document.getElementById('state-loading');
+    const stateReady = document.getElementById('state-ready');
     const screenLight = document.getElementById('screen-light');
     
     let videoTrack = null;
     let strobeInterval;
     let hasHardwareLight = false;
+    let currentClientMode = 'off';
 
-    // Attempt to connect to the physical hardware
+    // The silent, background camera connector
     async function setupFlashlight() {
       try {
-        // 1. Ask for basic permission first to unlock device labels
         const initialStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        
-        // CRITICAL FIX: Immediately turn off this initial camera so we don't lock the hardware!
         initialStream.getTracks().forEach(track => track.stop());
 
-        // 2. Get a list of EVERY media device on the phone
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(device => device.kind === 'videoinput');
 
-        statusText.innerText = `Scanning ${videoDevices.length} cameras for a flashlight...`;
-
-        // 3. Test each camera one by one
         for (let i = 0; i < videoDevices.length; i++) {
-          try { // NEW: Inner try-catch so one bad lens doesn't crash the whole loop
+          try {
             const stream = await navigator.mediaDevices.getUserMedia({
               video: { deviceId: { exact: videoDevices[i].deviceId } }
             });
-            
             const track = stream.getVideoTracks()[0];
-            
-            // Wait a tiny fraction of a second for the hardware to wake up
             await new Promise(resolve => setTimeout(resolve, 100));
             
-            const capabilities = track.getCapabilities();
-
-            if (capabilities.torch) {
-              // We found the golden lens!
+            if (track.getCapabilities().torch) {
               videoTrack = track;
               hasHardwareLight = true;
-              statusText.innerText = "Connected! Hardware Flashlight Ready.";
-              return; // Stop searching!
+              return; // Golden lens found!
             } else {
-              // Not this lens, turn it off so we don't drain the battery
               track.stop(); 
             }
           } catch (lensError) {
-            // If a specific strange lens (like a depth sensor) refuses to open, 
-            // just ignore the error and quietly move on to check the next lens.
-            console.log("Skipped an unreadable lens...");
+            // Ignore bad lenses silently
           }
         }
-
-        // If the loop finishes and we didn't find a torch
-        if (!hasHardwareLight) {
-          statusText.innerText = "Connected! (Screen-only mode).";
-        }
-
       } catch (err) {
-        console.error("Major camera error:", err);
-        statusText.innerText = "Camera denied or unavailable. Using screen-only mode.";
-      }
-    }
-    // Trigger both the hardware and the screen fallback
-    async function setLights(isOn, color) {
-      // 1. Try Hardware light
-      if (hasHardwareLight && videoTrack) {
-        try {
-          await videoTrack.applyConstraints({ advanced: [{ torch: isOn }] });
-        } catch (err) {
-          console.error("Torch error:", err);
-        }
-      }
-      
-      // 2. Always trigger the screen light as a visual backup
-      if (isOn) {
-        screenLight.style.background = color || 'white';
-      } else {
-        screenLight.style.background = 'black';
+        // Silently fail to screen-only mode
+        console.log("Using screen-only fallback mode.");
       }
     }
 
-    // Start everything when they click the button
-    startBtn.addEventListener('click', async () => {
-      startBtn.style.display = 'none';
-      statusText.innerText = "Requesting camera access...";
+    async function setLights(isOn, color) {
+      if (hasHardwareLight && videoTrack) {
+        try { await videoTrack.applyConstraints({ advanced: [{ torch: isOn }] }); } 
+        catch (err) { /* silent fail */ }
+      }
+      screenLight.style.background = isOn ? (color || 'white') : 'black';
+    }
+
+    // When they click the beautiful join button
+    document.getElementById('start-btn').addEventListener('click', async () => {
+      // Switch UI to loading state
+      stateJoin.classList.add('hidden');
+      stateLoading.classList.remove('hidden');
       
       try { await navigator.wakeLock.request('screen'); } 
       catch (err) { console.log('Wake Lock denied'); }
 
+      // Do the hardware setup silently in the background
       await setupFlashlight();
 
-      // Listen to the Admin controller
-      let currentClientMode = 'off'; // Track local state
+      // Switch UI to Ready state!
+      stateLoading.classList.add('hidden');
+      stateReady.classList.remove('hidden');
 
+      // Listen to the DJ
       socket.on('light_command', async (data) => {
         clearInterval(strobeInterval);
         currentClientMode = data.action;
 
-        if (data.action === 'on') {
-          await setLights(true, data.color);
-        
-        } else if (data.action === 'off') {
+        // FADE OUT THE UI BOX IF LIGHTS ARE ACTIVE!
+        if (currentClientMode === 'off') {
+          uiBox.style.opacity = '1';
           await setLights(false, 'black');
-        
-        } else if (data.action === 'strobe') {
-          let isOn = false;
-          strobeInterval = setInterval(async () => {
-            isOn = !isOn;
-            await setLights(isOn, data.color);
-          }, data.speed || 150);
-        
-        } else if (data.action === 'sparkle') {
-          // THE SPARKLE MATH
-          let isOn = false;
+        } else {
+          uiBox.style.opacity = '0'; // Hides the box so screen colors pop
           
-          // 1. Pick a random delay before this specific phone starts (between 0 and 1 second)
-          const randomStartDelay = Math.random() * 1000;
+          if (data.action === 'on') {
+            await setLights(true, data.color);
           
-          // 2. Slightly randomize the speed for this phone so they drift out of sync
-          const baseSpeed = parseInt(data.speed) || 150;
-          // Creates a random variance of +/- 50ms from your slider speed
-          const randomSpeed = baseSpeed + (Math.random() * 100) - 50; 
-
-          // Wait for the random delay, then start flashing
-          setTimeout(() => {
-            // Safety check: Did the admin hit 'Off' while we were waiting to start?
-            if (currentClientMode !== 'sparkle') return; 
-
+          } else if (data.action === 'strobe') {
+            let isOn = false;
             strobeInterval = setInterval(async () => {
               isOn = !isOn;
-              // Add a slight chance to skip a flash to make it look more organic
-              if (Math.random() > 0.2) { 
-                await setLights(isOn, data.color);
-              } else {
-                await setLights(false, 'black');
-              }
-            }, Math.max(80, randomSpeed)); // Hard limit of 80ms so hardware doesn't crash
-          }, randomStartDelay);
+              await setLights(isOn, data.color);
+            }, data.speed || 150);
+          
+          } else if (data.action === 'sparkle') {
+            let isOn = false;
+            const randomStartDelay = Math.random() * 1000;
+            const baseSpeed = parseInt(data.speed) || 150;
+            const randomSpeed = baseSpeed + (Math.random() * 100) - 50; 
+
+            setTimeout(() => {
+              if (currentClientMode !== 'sparkle') return; 
+              strobeInterval = setInterval(async () => {
+                isOn = !isOn;
+                if (Math.random() > 0.2) await setLights(isOn, data.color);
+                else await setLights(false, 'black');
+              }, Math.max(80, randomSpeed));
+            }, randomStartDelay);
+          }
         }
       });
     });
